@@ -219,6 +219,9 @@
 /*Defined Port*/
 #define PORT_ACTIVATOR 4
 
+/* Defining if we're debugging or not*/
+//#define DEBUG 1
+
 /* Ethernet header */
 struct sniff_ethernet {
         u_char  ether_dhost[ETHER_ADDR_LEN];    /* destination host address */
@@ -515,6 +518,10 @@ got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 
 return;
 }
+
+#ifdef DEBUG
+    printf("We are debugging right now\n");
+#endif
 
 int main(int argc, char **argv)
 {
