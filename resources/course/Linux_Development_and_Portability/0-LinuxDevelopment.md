@@ -23,11 +23,11 @@ Alright, this is where the magic happens and where we are about to inhabit. Read
  
 Understand these specifically:
 
-1. What is POSIX
-2. What is a system call
-3. What is glibc
-4. How do these all work together
-5. What is an ABI
+1. What is POSIX - Portable Operating System Interface, a standard for compatibility between operating systems.
+2. What is a system call - A call directly to the system's kernel.
+3. What is glibc - GNU C library.
+4. How do these all work together - They each play a role in having compatibility between different Operating Systems.
+5. What is an ABI - An interface between operating systems that lends to compatibility.
 
 This is the best book on the subject if you want to get way too in depth, or have a reference as you do things. I recommend buying it eventually. <https://en.wikipedia.org/wiki/The_Linux_Programming_Interface>
 
