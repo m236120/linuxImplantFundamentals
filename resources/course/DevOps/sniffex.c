@@ -519,12 +519,13 @@ got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 return;
 }
 
-#ifdef DEBUG
-    printf("We are debugging right now\n");
-#endif
+
 
 int main(int argc, char **argv)
 {
+	#ifdef DEBUG
+	printf("We are debugging right now\n");
+	#endif
 
 	char *dev = NULL;			/* capture device name */
 	char errbuf[PCAP_ERRBUF_SIZE];		/* error buffer */
