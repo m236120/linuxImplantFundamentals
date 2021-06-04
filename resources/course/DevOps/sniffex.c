@@ -524,7 +524,7 @@ return;
 int main(int argc, char **argv)
 {
 	#ifdef DEBUG
-	printf("We are debugging right now\n");
+		printf("We are debugging right now\n");
 	#endif
 
 	char *dev = NULL;			/* capture device name */
