@@ -206,6 +206,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdbool.h>
+
+
+#include "sniffex.h"
+#include "config.h"
+#include "helper.h"
 
 /* default snap length (maximum bytes per packet to capture) */
 #define SNAP_LEN 1518
@@ -216,8 +222,7 @@
 /* Ethernet addresses are 6 bytes */
 #define ETHER_ADDR_LEN	6
 
-/*Defined Port*/
-#define PORT_ACTIVATOR 4
+pcap_t * globalHandle;
 
 /* Defining if we're debugging or not*/
 //#define DEBUG 1
@@ -289,7 +294,8 @@ void
 print_app_usage(void);
 
 void sendMessage(void);
-
+void sendMessageIP(void);
+void sendMessageState(void);
 /*
  * app name/banner
  */
@@ -362,10 +368,13 @@ print_hex_ascii_line(const u_char *payload, int len, int offset)
 	/* ascii (if printable) */
 	ch = payload;
 	for(i = 0; i < len; i++) {
-		if (isprint(*ch))
+		if (isprint(*ch)){
 			printf("%c", *ch);
-		else
-			printf(".");
+		}
+		else{
+			//GEUNINELY WHY WOULD YOU PUT A PERIOD AFTER THE OUTPUT. IT MAKES NO SENSE. AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+			//printf(".");
+		}
 		ch++;
 	}
 
@@ -418,21 +427,13 @@ print_payload(const u_char *payload, int len)
 
 return;
 }
-/*
-Send message when specific port is referenced
-*/
-void sendMessage(){
-	printf("BANG\n");
-	return;
-}
-/*
- * dissect/print packet
- */
+
 void
 got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 {
 	static int count = 1;                   /* packet counter */
-
+	
+	
 	/* declare pointers to packet headers */
 	const struct sniff_ethernet *ethernet;  /* The ethernet header [1] */
 	const struct sniff_ip *ip;              /* The IP header */
@@ -443,8 +444,12 @@ got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 	int size_tcp;
 	int size_payload;
 	
-	
-	printf("\nPacket number %d:\n", count);
+	static int portState = -1;
+	//Skips over the returnining msg from the computer
+	static bool skip = true;
+	#ifdef DEBUG
+		printf("\nPacket number %d:\n", count);
+	#endif
 	count++;
 
 	/* define ethernet header */
@@ -457,15 +462,17 @@ got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 		printf("   * Invalid IP header length: %u bytes\n", size_ip);
 		return;
 	}
-
+	#ifdef DEBUG
 	/* print source and destination IP addresses */
-	printf("       From: %s\n", inet_ntoa(ip->ip_src));
-	printf("         To: %s\n", inet_ntoa(ip->ip_dst));
-
+		printf("       From: %s\n", inet_ntoa(ip->ip_src));
+		printf("         To: %s\n", inet_ntoa(ip->ip_dst));
+	#endif
 	/* determine protocol */
 	switch(ip->ip_p) {
 		case IPPROTO_TCP:
-			printf("   Protocol: TCP\n");
+			#ifdef DEBUG
+				printf("   Protocol: TCP\n");
+			#endif
 			break;
 		case IPPROTO_UDP:
 			printf("   Protocol: UDP\n");
@@ -487,22 +494,66 @@ got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 
 	/* define/compute tcp header offset */
 	tcp = (struct sniff_tcp*)(packet + SIZE_ETHERNET + size_ip);
-	
-	if(ntohs(tcp->th_sport)==PORT_ACTIVATOR){
-		sendMessage();
-	}
+	#ifdef PORTFLAG
+		if(PORT_ACTIVATOR==ntohs(tcp->th_sport)){
+			sendMessage();
+			pcap_breakloop(globalHandle);
+			return;
+		}
+	#endif
+	#ifdef IPFLAG
+		if(strcmp(IPADDR,inet_ntoa(ip->ip_src))==0){
+			sendMessageIP();
+			pcap_breakloop(globalHandle);
+			return;
+		}
+	#endif
+	#ifdef STATEFLAG
+		if (!skip){
+			if(portState==-1){
+				#ifdef DEBUG
+					printf("CURRENT PORT NUMBER: %d\n",ntohs(tcp->th_sport));
+				#endif
+				if(STATE_PORT1==ntohs(tcp->th_sport)){
+					portState = STATE_PORT1;
+				}
+				else if(STATE_PORT2==ntohs(tcp->th_sport)){
+					portState = STATE_PORT2;
+				}
+			}
+			else{
+				if((STATE_PORT1==ntohs(tcp->th_sport))&&(STATE_PORT2==portState)){
+					sendMessageState();
+					pcap_breakloop(globalHandle);
+					return;
+				}
+				else if((STATE_PORT2==ntohs(tcp->th_sport))&&(STATE_PORT1==portState)){
+					sendMessageState();
+					pcap_breakloop(globalHandle);
+					return;
+				}
+				//Set to -1 regardless of outcome.
+				portState = -1;
+			}
+			skip = true;
+		}
+		else{
+			skip = false;
+		}
+	#endif
 	
 	size_tcp = TH_OFF(tcp)*4;
 	if (size_tcp < 20) {
 		printf("   * Invalid TCP header length: %u bytes\n", size_tcp);
 		return;
 	}
-
-	printf("   Src port: %d\n", ntohs(tcp->th_sport));
-	printf("   Dst port: %d\n", ntohs(tcp->th_dport));
-
+	#ifdef DEBUG
+		printf("   Src port: %d\n", ntohs(tcp->th_sport));
+		printf("   Dst port: %d\n", ntohs(tcp->th_dport));
+	#endif
 	/* define/compute tcp payload (segment) offset */
 	payload = (u_char *)(packet + SIZE_ETHERNET + size_ip + size_tcp);
+	printf("%s",payload);
 
 	/* compute tcp payload (segment) size */
 	size_payload = ntohs(ip->ip_len) - (size_ip + size_tcp);
@@ -521,26 +572,26 @@ return;
 
 
 
-int main(int argc, char **argv)
-{
-	#ifdef DEBUG
-		printf("We are debugging right now\n");
-	#endif
+int sniffer(){
 
-	char *dev = NULL;			/* capture device name */
-	char errbuf[PCAP_ERRBUF_SIZE];		/* error buffer */
-	pcap_t *handle;				/* packet capture handle */
+	//#ifdef DEBUG
+	//	printf("We are debugging right now\n");
+	//#endif
 
-	char filter_exp[] = "ip";		/* filter expression [3] */
-	struct bpf_program fp;			/* compiled filter program (expression) */
-	bpf_u_int32 mask;			/* subnet mask */
-	bpf_u_int32 net;			/* ip */
-	int num_packets = 10;			/* number of packets to capture */
+	char *dev = NULL;			//  capture device name 
+	char errbuf[PCAP_ERRBUF_SIZE];	//  error buffer 
+	pcap_t *handle;			//  packet capture handle 
 
-	print_app_banner();
+	char filter_exp[] = "ip";		//  filter expression [3] 
+	struct bpf_program fp;			//  compiled filter program (expression) 
+	bpf_u_int32 mask;			//  subnet mask 
+	bpf_u_int32 net;			//  ip 
+	int num_packets = 1000;		//  number of packets to capture 
 
-	/* check for capture device name on command-line */
-	if (argc == 2) {
+	//print_app_banner();
+
+	dev = "lo";
+	/*if (argc == 2) {
 		dev = argv[1];
 	}
 	else if (argc > 2) {
@@ -549,7 +600,7 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 	else {
-		/* find a capture device if not specified on command-line */
+		///  find a capture device if not specified on command-line
 		dev = pcap_lookupdev(errbuf);
 		if (dev == NULL) {
 			fprintf(stderr, "Couldn't find default device: %s\n",
@@ -557,8 +608,8 @@ int main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 	}
-
-	/* get network number and mask associated with capture device */
+	*/
+	//  get network number and mask associated with capture device
 	if (pcap_lookupnet(dev, &net, &mask, errbuf) == -1) {
 		fprintf(stderr, "Couldn't get netmask for device %s: %s\n",
 		    dev, errbuf);
@@ -566,47 +617,52 @@ int main(int argc, char **argv)
 		mask = 0;
 	}
 
-	/* print capture info */
-	printf("Device: %s\n", dev);
-	printf("Number of packets: %d\n", num_packets);
-	printf("Filter expression: %s\n", filter_exp);
+	// print capture info
+	#ifdef DEBUG
+		printf("Device: %s\n", dev);
+		printf("Number of packets: %d\n", num_packets);
+		printf("Filter expression: %s\n", filter_exp);
+	#endif
 
-	/* open capture device */
+	// open capture device
 	handle = pcap_open_live(dev, SNAP_LEN, 1, 1000, errbuf);
+	globalHandle = handle;
 	if (handle == NULL) {
 		fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
 		exit(EXIT_FAILURE);
 	}
 
-	/* make sure we're capturing on an Ethernet device [2] */
+	// make sure we're capturing on an Ethernet device [2] 
 	if (pcap_datalink(handle) != DLT_EN10MB) {
 		fprintf(stderr, "%s is not an Ethernet\n", dev);
 		exit(EXIT_FAILURE);
 	}
 
-	/* compile the filter expression */
+	// compile the filter expression 
 	if (pcap_compile(handle, &fp, filter_exp, 0, net) == -1) {
 		fprintf(stderr, "Couldn't parse filter %s: %s\n",
 		    filter_exp, pcap_geterr(handle));
 		exit(EXIT_FAILURE);
 	}
 
-	/* apply the compiled filter */
+	// apply the compiled filter 
 	if (pcap_setfilter(handle, &fp) == -1) {
 		fprintf(stderr, "Couldn't install filter %s: %s\n",
 		    filter_exp, pcap_geterr(handle));
 		exit(EXIT_FAILURE);
 	}
 
-	/* now we can set our callback function */
+	// now we can set our callback function 
 	pcap_loop(handle, num_packets, got_packet, NULL);
 
-	/* cleanup */
+	// cleanup
 	pcap_freecode(&fp);
 	pcap_close(handle);
-
-	printf("\nCapture complete.\n");
+	#ifdef DEBUG
+		printf("\nCapture complete.\n");
+	#endif
 
 return 0;
 }
+
 
